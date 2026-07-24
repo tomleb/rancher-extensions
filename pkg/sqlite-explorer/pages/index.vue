@@ -30,6 +30,8 @@
         <tr>
           <th>Pod</th>
           <th>Container</th>
+          <th>DB size / WAL / SHM</th>
+          <th></th>
           <th></th>
         </tr>
       </thead>
@@ -40,6 +42,26 @@
         >
           <td>{{ entry.pod.metadata.name }}</td>
           <td>{{ entry.container }}</td>
+          <td>
+            <span v-if="metricsError[entry.pod.metadata.name]" class="text-error">
+              {{ metricsError[entry.pod.metadata.name] }}
+            </span>
+            <span v-else-if="metrics[entry.pod.metadata.name]">
+              {{ formatBytes(metrics[entry.pod.metadata.name].dbBytes) }}
+              / {{ formatBytes(metrics[entry.pod.metadata.name].walBytes) }}
+              / {{ formatBytes(metrics[entry.pod.metadata.name].shmBytes) }}
+            </span>
+            <span v-else class="text-muted">—</span>
+          </td>
+          <td>
+            <button
+              class="btn btn-sm role-secondary"
+              :disabled="!!metricsLoadingFor"
+              @click="refreshMetrics(entry)"
+            >
+              {{ metricsLoadingFor === entry.pod.metadata.name ? 'Fetching...' : 'Refresh metrics' }}
+            </button>
+          </td>
           <td>
             <button
               v-if="!sessions[entry.pod.metadata.name]"
@@ -79,6 +101,8 @@ import { buildPodSpec, targetContainerFor } from '../utils/podSpec';
 import { podProxyUrlFromParts } from '../utils/proxyUrl';
 import { DUMPER_ENTRYPOINT_SCRIPT } from '../utils/dumperScript';
 import { ensureDumperRbac } from '../utils/rbac';
+import { ensureMetricsRbac } from '../utils/metricsRbac';
+import { fetchPodMetrics, formatBytes } from '../utils/metricsFetch';
 import { createResourceRaw } from '../utils/steveRaw';
 
 const VIEWER_PORT = 8001;
@@ -89,12 +113,15 @@ const POLL_MAX_ATTEMPTS = 60;
 export default {
   data() {
     return {
-      loadingPods:   true,
-      candidatePods: [],
-      launchingFor:  null,
-      statusMessage: '',
-      sessions:      {},
-      error:         null,
+      loadingPods:      true,
+      candidatePods:    [],
+      launchingFor:     null,
+      statusMessage:    '',
+      sessions:         {},
+      error:            null,
+      metrics:          {},
+      metricsError:     {},
+      metricsLoadingFor: null,
     };
   },
   async created() {
@@ -125,6 +152,43 @@ export default {
     }
   },
   methods: {
+    formatBytes,
+    async refreshMetrics(entry) {
+      const podKey = entry.pod.metadata.name;
+
+      this.metricsLoadingFor = podKey;
+      this.metricsError = { ...this.metricsError, [podKey]: null };
+
+      try {
+        // The metrics-fetcher pod reuses the dumper flow's ServiceAccount (see
+        // metricsRbac.ts) but ensureMetricsRbac() only creates the ClusterRoleBinding --
+        // it doesn't create the ServiceAccount itself. On a fresh cluster where "Refresh
+        // metrics" is clicked before "Open SQLite Explorer" has ever run, the SA doesn't
+        // exist yet and pod creation fails with "serviceaccount ... not found" (found via
+        // real browser click-through, 2026-07-24). Ensure both, in order, every time.
+        await ensureDumperRbac(this.$store, NAMESPACE);
+        await ensureMetricsRbac(this.$store, NAMESPACE);
+
+        const targetPodIp = entry.pod.status?.podIP;
+
+        if (!targetPodIp) {
+          throw new Error('Target pod has no podIP yet (not Running?) -- cannot reach its /metrics.');
+        }
+
+        const result = await fetchPodMetrics(this.$store, {
+          appType:       entry.appType,
+          targetPodName: entry.pod.metadata.name,
+          targetPodIp,
+          namespace:     NAMESPACE,
+        });
+
+        this.metrics = { ...this.metrics, [podKey]: result };
+      } catch (e) {
+        this.metricsError = { ...this.metricsError, [podKey]: e.message };
+      } finally {
+        this.metricsLoadingFor = null;
+      }
+    },
     async launch(entry) {
       const podKey = entry.pod.metadata.name;
 
