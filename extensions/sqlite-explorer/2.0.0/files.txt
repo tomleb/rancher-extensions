@@ -1,0 +1,5 @@
+plugin/package.json
+plugin/sqlite-explorer-2.0.0.umd.min.37.js
+plugin/sqlite-explorer-2.0.0.umd.min.37.js.map
+plugin/sqlite-explorer-2.0.0.umd.min.js
+plugin/sqlite-explorer-2.0.0.umd.min.js.map

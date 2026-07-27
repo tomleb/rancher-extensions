@@ -11,6 +11,25 @@ entries:
       catalog.cattle.io/ui-component: plugins
       catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 4.0.0'
     apiVersion: v2
+    appVersion: 2.0.0
+    created: "2026-07-27T16:17:08.718065533Z"
+    description: sqlite-explorer plugin
+    digest: 3c9c6cff5d47e7a6eb77a936375eb133c7bf3d4acf72af42e258504b45f8ed23
+    name: sqlite-explorer
+    type: application
+    urls:
+    - assets/sqlite-explorer/sqlite-explorer-2.0.0.tgz
+    version: 2.0.0
+  - annotations:
+      catalog.cattle.io/certified: rancher
+      catalog.cattle.io/namespace: cattle-ui-plugin-system
+      catalog.cattle.io/os: linux
+      catalog.cattle.io/permits-os: linux, windows
+      catalog.cattle.io/rancher-version: '>= 2.10.0'
+      catalog.cattle.io/scope: management
+      catalog.cattle.io/ui-component: plugins
+      catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 4.0.0'
+    apiVersion: v2
     appVersion: 0.1.1
     created: "2026-07-24T12:57:48.102643546Z"
     description: sqlite-explorer plugin
@@ -39,4 +58,4 @@ entries:
     urls:
     - assets/sqlite-explorer/sqlite-explorer-0.1.0.tgz
     version: 0.1.0
-generated: "2026-07-24T12:57:48.10210331Z"
+generated: "2026-07-27T16:17:08.716974335Z"
