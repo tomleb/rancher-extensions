@@ -1,7 +1,7 @@
 {
   "name": "sqlite-explorer",
   "description": "sqlite-explorer plugin",
-  "version": "0.1.1",
+  "version": "2.0.0",
   "private": false,
   "rancher": {
     "annotations": {
