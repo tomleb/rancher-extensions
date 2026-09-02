@@ -1,5 +1,7 @@
 <script>
 import RcButton from '@components/RcButton/RcButton.vue';
+import { getWhoamiStatus, ensureWhoamiDeployed, teardownWhoami } from '../utils/whoami';
+import { whoamiServiceUrl } from '../utils/whoamiSpec';
 
 const AUTH_MODE = {
   NONE:       'none',
@@ -34,6 +36,13 @@ export default {
       allowError:   null,
       allowMessage: null,
       response:     null,
+      whoami: {
+        loading:  false,
+        deploying: false,
+        removing: false,
+        error:    null,
+        status:   null,
+      },
     };
   },
 
@@ -51,6 +60,10 @@ export default {
     needsPasswordField() {
       return this.form.authMode === AUTH_MODE.CREDENTIAL && ['bearer', 'basic', 'digest'].includes(this.form.authSigner);
     },
+  },
+
+  async created() {
+    await this.refreshWhoamiStatus();
   },
 
   methods: {
@@ -187,6 +200,49 @@ export default {
         this.allowLoading = false;
       }
     },
+
+    async refreshWhoamiStatus() {
+      this.whoami.loading = true;
+      this.whoami.error = null;
+      try {
+        this.whoami.status = await getWhoamiStatus(this.$store);
+      } catch (e) {
+        this.whoami.error = this.describeError(e).message;
+      } finally {
+        this.whoami.loading = false;
+      }
+    },
+
+    async deployWhoami() {
+      this.whoami.deploying = true;
+      this.whoami.error = null;
+      try {
+        await ensureWhoamiDeployed(this.$store);
+        await this.refreshWhoamiStatus();
+      } catch (e) {
+        this.whoami.error = this.describeError(e).message;
+      } finally {
+        this.whoami.deploying = false;
+      }
+    },
+
+    async removeWhoami() {
+      this.whoami.removing = true;
+      this.whoami.error = null;
+      try {
+        await teardownWhoami(this.$store);
+        await this.refreshWhoamiStatus();
+      } catch (e) {
+        this.whoami.error = this.describeError(e).message;
+      } finally {
+        this.whoami.removing = false;
+      }
+    },
+
+    useWhoamiUrl() {
+      this.form.url = whoamiServiceUrl();
+      this.form.authMode = AUTH_MODE.NONE;
+    },
   },
 };
 </script>
@@ -195,6 +251,49 @@ export default {
   <div>
     <h2>Meta Proxy Tester</h2>
     <p>Manually issue requests through Rancher's <code>/meta/proxy</code> endpoint via <code>this.$shell.proxy</code>, for testing the meta-proxy / ProxyEndpoint feature work.</p>
+
+    <h3>Test target: whoami</h3>
+    <p>
+      Deploys <a href="https://github.com/traefik/whoami" target="_blank" rel="noopener">traefik/whoami</a>
+      (a trivial HTTP echo server) to the <code>local</code> cluster, reachable at a stable
+      Service DNS name -- a known-good target for exercising <code>/meta/proxy</code> without
+      relying on a real external API.
+    </p>
+    <p v-if="whoami.status">
+      Status:
+      <span v-if="whoami.status.readyReplicas > 0" class="text-success">deployed and ready</span>
+      <span v-else-if="whoami.status.deploymentExists" class="text-muted">deployed, not ready yet</span>
+      <span v-else class="text-muted">not deployed</span>
+      <template v-if="whoami.status.deploymentExists">
+        — <code>{{ whoami.status.url }}</code>
+      </template>
+    </p>
+    <RcButton
+      primary
+      class="mr-10"
+      :disabled="whoami.deploying || whoami.loading"
+      @click="deployWhoami"
+    >
+      {{ whoami.deploying ? 'Deploying...' : 'Deploy whoami' }}
+    </RcButton>
+    <RcButton
+      class="mr-10"
+      :disabled="!whoami.status || !whoami.status.deploymentExists || whoami.removing"
+      @click="removeWhoami"
+    >
+      {{ whoami.removing ? 'Removing...' : 'Remove whoami' }}
+    </RcButton>
+    <RcButton
+      :disabled="!whoami.status || !whoami.status.deploymentExists"
+      @click="useWhoamiUrl"
+    >
+      Use whoami URL in form below
+    </RcButton>
+    <p v-if="whoami.error" class="text-error mt-10">
+      {{ whoami.error }}
+    </p>
+
+    <hr class="mt-20 mb-20">
 
     <form @submit.prevent="submit">
       <div class="row mb-10">
