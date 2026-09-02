@@ -1,7 +1,7 @@
 <script>
 import RcButton from '@components/RcButton/RcButton.vue';
 import { getWhoamiStatus, ensureWhoamiDeployed, teardownWhoami } from '../utils/whoami';
-import { whoamiServiceUrl } from '../utils/whoamiSpec';
+import { whoamiServiceUrl, whoamiTlsServiceUrl } from '../utils/whoamiSpec';
 
 const AUTH_MODE = {
   NONE:       'none',
@@ -59,6 +59,14 @@ export default {
 
     needsPasswordField() {
       return this.form.authMode === AUTH_MODE.CREDENTIAL && ['bearer', 'basic', 'digest'].includes(this.form.authSigner);
+    },
+
+    whoamiHttpUrl() {
+      return whoamiServiceUrl();
+    },
+
+    whoamiTlsUrl() {
+      return whoamiTlsServiceUrl();
     },
   },
 
@@ -239,8 +247,8 @@ export default {
       }
     },
 
-    useWhoamiUrl() {
-      this.form.url = whoamiServiceUrl();
+    useWhoamiUrl(url) {
+      this.form.url = url;
       this.form.authMode = AUTH_MODE.NONE;
     },
   },
@@ -255,39 +263,67 @@ export default {
     <h3>Test target: whoami</h3>
     <p>
       Deploys <a href="https://github.com/traefik/whoami" target="_blank" rel="noopener">traefik/whoami</a>
-      (a trivial HTTP echo server) to the <code>local</code> cluster, reachable at a stable
-      Service DNS name -- a known-good target for exercising <code>/meta/proxy</code> without
-      relying on a real external API.
+      (a trivial HTTP echo server) to the <code>local</code> cluster, as two variants
+      reachable at stable Service DNS names -- known-good targets for exercising
+      <code>/meta/proxy</code> without relying on a real external API:
     </p>
-    <p v-if="whoami.status">
-      Status:
-      <span v-if="whoami.status.readyReplicas > 0" class="text-success">deployed and ready</span>
-      <span v-else-if="whoami.status.deploymentExists" class="text-muted">deployed, not ready yet</span>
-      <span v-else class="text-muted">not deployed</span>
-      <template v-if="whoami.status.deploymentExists">
-        — <code>{{ whoami.status.url }}</code>
-      </template>
-    </p>
+    <ul>
+      <li>plain HTTP</li>
+      <li>self-signed HTTPS (untrusted certificate, generated on deploy) — for testing how the proxy handles a target it can't verify (see rancher/rancher#53667)</li>
+    </ul>
+    <table v-if="whoami.status" class="mb-10">
+      <tbody>
+        <tr>
+          <td class="pr-10"><strong>HTTP</strong></td>
+          <td class="pr-10">
+            <span v-if="whoami.status.http.readyReplicas > 0" class="text-success">ready</span>
+            <span v-else-if="whoami.status.http.deploymentExists" class="text-muted">deployed, not ready yet</span>
+            <span v-else class="text-muted">not deployed</span>
+          </td>
+          <td class="pr-10"><code v-if="whoami.status.http.deploymentExists">{{ whoami.status.http.url }}</code></td>
+          <td>
+            <RcButton
+              v-if="whoami.status.http.deploymentExists"
+              small
+              @click="useWhoamiUrl(whoamiHttpUrl)"
+            >
+              Use this URL
+            </RcButton>
+          </td>
+        </tr>
+        <tr>
+          <td class="pr-10"><strong>HTTPS (self-signed)</strong></td>
+          <td class="pr-10">
+            <span v-if="whoami.status.tls.readyReplicas > 0" class="text-success">ready</span>
+            <span v-else-if="whoami.status.tls.deploymentExists" class="text-muted">deployed, not ready yet</span>
+            <span v-else class="text-muted">not deployed</span>
+          </td>
+          <td class="pr-10"><code v-if="whoami.status.tls.deploymentExists">{{ whoami.status.tls.url }}</code></td>
+          <td>
+            <RcButton
+              v-if="whoami.status.tls.deploymentExists"
+              small
+              @click="useWhoamiUrl(whoamiTlsUrl)"
+            >
+              Use this URL
+            </RcButton>
+          </td>
+        </tr>
+      </tbody>
+    </table>
     <RcButton
       primary
       class="mr-10"
       :disabled="whoami.deploying || whoami.loading"
       @click="deployWhoami"
     >
-      {{ whoami.deploying ? 'Deploying...' : 'Deploy whoami' }}
+      {{ whoami.deploying ? 'Deploying...' : 'Deploy whoami (both)' }}
     </RcButton>
     <RcButton
-      class="mr-10"
-      :disabled="!whoami.status || !whoami.status.deploymentExists || whoami.removing"
+      :disabled="!whoami.status || (!whoami.status.http.deploymentExists && !whoami.status.tls.deploymentExists) || whoami.removing"
       @click="removeWhoami"
     >
-      {{ whoami.removing ? 'Removing...' : 'Remove whoami' }}
-    </RcButton>
-    <RcButton
-      :disabled="!whoami.status || !whoami.status.deploymentExists"
-      @click="useWhoamiUrl"
-    >
-      Use whoami URL in form below
+      {{ whoami.removing ? 'Removing...' : 'Remove whoami (both)' }}
     </RcButton>
     <p v-if="whoami.error" class="text-error mt-10">
       {{ whoami.error }}
