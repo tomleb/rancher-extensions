@@ -5,7 +5,7 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@rancher/shell": "^3.0.11"
+    "@rancher/shell": "^3.0.13"
   },
   "resolutions": {
     "@types/node": "~25.3.0",
