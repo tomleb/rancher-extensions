@@ -29,6 +29,24 @@ API=<your-Rancher-URL> yarn dev
 Then open `https://localhost:8005` (or wherever you've proxied port 8005) and log in
 to your Rancher instance to see the extension loaded.
 
+### Using Docker (no local Node/Yarn required)
+
+```sh
+make dev API=<your-Rancher-URL>
+```
+
+This builds a small `node:24-bookworm` image (`Dockerfile.dev`) with Yarn 4.5 enabled
+via corepack, then runs it with:
+- the repo bind-mounted into `/work` (so `node_modules`/edits persist on the host and
+  hot-reload works normally),
+- port `8005` published to the host,
+- `API` passed through to `yarn dev` inside the container.
+
+Same result as running the commands above directly — open `https://localhost:8005` and
+log in to `$API` to see the extension loaded. `Ctrl-C` stops the container (`--rm`, so
+nothing lingers). Re-running `make dev` reuses the cached `node_modules` from the bind
+mount and skips straight to `yarn dev` after `yarn install` finds nothing new to do.
+
 ## Building & publishing
 
 ```sh

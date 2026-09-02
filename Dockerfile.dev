@@ -1,0 +1,16 @@
+# Development container for this extensions repo.
+#
+# Provides Node 24 + Yarn 4.5 (via corepack) so `make dev` doesn't require any
+# of that to be installed on the host. See `make dev` in the Makefile and the
+# "Development" section of README.md for the commands this replicates.
+FROM node:24-bookworm
+
+WORKDIR /work
+
+# Enable corepack once at image-build time; yarn version itself is pinned by
+# this repo's package.json "packageManager" field and resolved on first use.
+RUN corepack enable
+
+EXPOSE 8005
+
+CMD ["sh", "-c", "corepack yarn install --network-timeout 300000 && API=\"$API\" corepack yarn dev"]
