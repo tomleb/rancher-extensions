@@ -96,6 +96,46 @@ export default {
       return { token, authSigner: authSigner || undefined };
     },
 
+    // Rancher's shell request action rejects with the raw (unwrapped) response body,
+    // decorated with non-enumerable _status/_statusText/_headers/_url properties (see
+    // @rancher/shell/plugins/steve/actions.js's responseObject/onError) -- it does NOT
+    // have a `.message` property, so `String(e)` on it prints the useless literal
+    // "[object Object]". Build a real, readable dump instead.
+    describeError(e) {
+      const status = e?._status ?? e?.status;
+      const statusText = e?._statusText ?? e?.statusText;
+      const body = e?.body ?? e?.data ?? e;
+
+      let summary = e?.message;
+
+      if (!summary) {
+        summary = [status, statusText].filter(Boolean).join(' ') || 'Request failed';
+      }
+
+      // 502/503 from /meta/proxy almost always means the target host isn't on
+      // Rancher's proxy allow-list yet -- call it out explicitly since it's the
+      // single most common thing to hit while testing arbitrary URLs here.
+      if (status === 502 || status === 503) {
+        summary += ' -- likely means the target host is not on Rancher\'s proxy allow-list. Use "Allow Domain" below to add it, then retry.';
+      }
+
+      let dump;
+
+      try {
+        // Include non-enumerable props (_status etc aren't enumerable via defineProperties)
+        // by explicitly listing them alongside a JSON.stringify of the rest.
+        dump = JSON.stringify({
+          status, statusText, body, headers: e?._headers ?? e?.headers,
+        }, null, 2);
+      } catch (jsonErr) {
+        dump = `<unserializable error object: ${ jsonErr.message }>`;
+      }
+
+      return {
+        message: summary, status, body: dump,
+      };
+    },
+
     async submit() {
       this.error = null;
       this.response = null;
@@ -121,11 +161,7 @@ export default {
           body:   res,
         };
       } catch (e) {
-        this.error = {
-          message: e?.message || String(e),
-          status:  e?._status ?? e?.status,
-          body:    e?.body ?? e?.data,
-        };
+        this.error = this.describeError(e);
       } finally {
         this.loading = false;
       }
@@ -238,7 +274,7 @@ export default {
       <h4>Error</h4>
       <p v-if="error.status">Status: {{ error.status }}</p>
       <p>{{ error.message }}</p>
-      <pre v-if="error.body">{{ JSON.stringify(error.body, null, 2) }}</pre>
+      <pre v-if="error.body">{{ error.body }}</pre>
     </div>
 
     <div v-if="response" class="mt-20">
