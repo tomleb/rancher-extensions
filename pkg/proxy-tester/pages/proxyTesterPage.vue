@@ -1,7 +1,7 @@
 <script>
 import RcButton from '@components/RcButton/RcButton.vue';
-import { getWhoamiStatus, ensureWhoamiDeployed, teardownWhoami } from '../utils/whoami';
-import { whoamiServiceUrl, whoamiTlsServiceUrl, echoServiceUrl } from '../utils/whoamiSpec';
+import { getEchoStatus, ensureEchoDeployed, teardownEcho } from '../utils/echo';
+import { echoHttpServiceUrl, echoHttpsServiceUrl } from '../utils/echoSpec';
 
 const AUTH_MODE = {
   NONE:       'none',
@@ -36,7 +36,7 @@ export default {
       allowError:   null,
       allowMessage: null,
       response:     null,
-      whoami: {
+      echo: {
         loading:  false,
         deploying: false,
         removing: false,
@@ -61,21 +61,17 @@ export default {
       return this.form.authMode === AUTH_MODE.CREDENTIAL && ['bearer', 'basic', 'digest'].includes(this.form.authSigner);
     },
 
-    whoamiHttpUrl() {
-      return whoamiServiceUrl();
+    echoHttpUrl() {
+      return echoHttpServiceUrl();
     },
 
-    whoamiTlsUrl() {
-      return whoamiTlsServiceUrl();
-    },
-
-    echoUrl() {
-      return echoServiceUrl();
+    echoHttpsUrl() {
+      return echoHttpsServiceUrl();
     },
   },
 
   async created() {
-    await this.refreshWhoamiStatus();
+    await this.refreshEchoStatus();
   },
 
   methods: {
@@ -213,45 +209,45 @@ export default {
       }
     },
 
-    async refreshWhoamiStatus() {
-      this.whoami.loading = true;
-      this.whoami.error = null;
+    async refreshEchoStatus() {
+      this.echo.loading = true;
+      this.echo.error = null;
       try {
-        this.whoami.status = await getWhoamiStatus(this.$store);
+        this.echo.status = await getEchoStatus(this.$store);
       } catch (e) {
-        this.whoami.error = this.describeError(e).message;
+        this.echo.error = this.describeError(e).message;
       } finally {
-        this.whoami.loading = false;
+        this.echo.loading = false;
       }
     },
 
-    async deployWhoami() {
-      this.whoami.deploying = true;
-      this.whoami.error = null;
+    async deployEcho() {
+      this.echo.deploying = true;
+      this.echo.error = null;
       try {
-        await ensureWhoamiDeployed(this.$store);
-        await this.refreshWhoamiStatus();
+        await ensureEchoDeployed(this.$store);
+        await this.refreshEchoStatus();
       } catch (e) {
-        this.whoami.error = this.describeError(e).message;
+        this.echo.error = this.describeError(e).message;
       } finally {
-        this.whoami.deploying = false;
+        this.echo.deploying = false;
       }
     },
 
-    async removeWhoami() {
-      this.whoami.removing = true;
-      this.whoami.error = null;
+    async removeEcho() {
+      this.echo.removing = true;
+      this.echo.error = null;
       try {
-        await teardownWhoami(this.$store);
-        await this.refreshWhoamiStatus();
+        await teardownEcho(this.$store);
+        await this.refreshEchoStatus();
       } catch (e) {
-        this.whoami.error = this.describeError(e).message;
+        this.echo.error = this.describeError(e).message;
       } finally {
-        this.whoami.removing = false;
+        this.echo.removing = false;
       }
     },
 
-    useWhoamiUrl(url) {
+    useEchoUrl(url) {
       this.form.url = url;
       this.form.authMode = AUTH_MODE.NONE;
     },
@@ -264,34 +260,34 @@ export default {
     <h2>Meta Proxy Tester</h2>
     <p>Manually issue requests through Rancher's <code>/meta/proxy</code> endpoint via <code>this.$shell.proxy</code>, for testing the meta-proxy / ProxyEndpoint feature work.</p>
 
-    <h3>Test target: whoami</h3>
+    <h3>Test target: http-https-echo</h3>
     <p>
-      Deploys <a href="https://github.com/traefik/whoami" target="_blank" rel="noopener">traefik/whoami</a>
-      and <a href="https://github.com/mendhak/docker-http-https-echo" target="_blank" rel="noopener">mendhak/http-https-echo</a>
-      to the <code>local</code> cluster, as three variants reachable at stable Service DNS
+      Deploys <a href="https://github.com/mendhak/docker-http-https-echo" target="_blank" rel="noopener">mendhak/http-https-echo</a>
+      to the <code>local</code> cluster as two variants, reachable at stable Service DNS
       names -- known-good targets for exercising <code>/meta/proxy</code> without relying
-      on a real external API:
+      on a real external API. Unlike whoami, this image echoes back the FULL incoming
+      request (method, path, ALL headers, body, cookies) verbatim as JSON -- needed to
+      confirm exactly what <code>/meta/proxy</code> forwards/strips/rewrites.
     </p>
     <ul>
-      <li>whoami, plain HTTP</li>
-      <li>whoami, self-signed HTTPS (untrusted certificate, generated on deploy) — for testing how the proxy handles a target it can't verify (see rancher/rancher#53667)</li>
-      <li>http-https-echo, plain HTTP only — echoes back the full incoming request (headers, method, body) verbatim as JSON, useful for confirming exactly what /meta/proxy forwards</li>
+      <li>plain HTTP</li>
+      <li>self-signed HTTPS (built-in cert, untrusted) — for testing how the proxy handles a target it can't verify (see rancher/rancher#53667)</li>
     </ul>
-    <table v-if="whoami.status" class="mb-10">
+    <table v-if="echo.status" class="mb-10">
       <tbody>
         <tr>
           <td class="pr-10"><strong>HTTP</strong></td>
           <td class="pr-10">
-            <span v-if="whoami.status.http.readyReplicas > 0" class="text-success">ready</span>
-            <span v-else-if="whoami.status.http.deploymentExists" class="text-muted">deployed, not ready yet</span>
+            <span v-if="echo.status.http.readyReplicas > 0" class="text-success">ready</span>
+            <span v-else-if="echo.status.http.deploymentExists" class="text-muted">deployed, not ready yet</span>
             <span v-else class="text-muted">not deployed</span>
           </td>
-          <td class="pr-10"><code v-if="whoami.status.http.deploymentExists">{{ whoami.status.http.url }}</code></td>
+          <td class="pr-10"><code v-if="echo.status.http.deploymentExists">{{ echo.status.http.url }}</code></td>
           <td>
             <RcButton
-              v-if="whoami.status.http.deploymentExists"
+              v-if="echo.status.http.deploymentExists"
               small
-              @click="useWhoamiUrl(whoamiHttpUrl)"
+              @click="useEchoUrl(echoHttpUrl)"
             >
               Use this URL
             </RcButton>
@@ -300,34 +296,16 @@ export default {
         <tr>
           <td class="pr-10"><strong>HTTPS (self-signed)</strong></td>
           <td class="pr-10">
-            <span v-if="whoami.status.tls.readyReplicas > 0" class="text-success">ready</span>
-            <span v-else-if="whoami.status.tls.deploymentExists" class="text-muted">deployed, not ready yet</span>
+            <span v-if="echo.status.https.readyReplicas > 0" class="text-success">ready</span>
+            <span v-else-if="echo.status.https.deploymentExists" class="text-muted">deployed, not ready yet</span>
             <span v-else class="text-muted">not deployed</span>
           </td>
-          <td class="pr-10"><code v-if="whoami.status.tls.deploymentExists">{{ whoami.status.tls.url }}</code></td>
+          <td class="pr-10"><code v-if="echo.status.https.deploymentExists">{{ echo.status.https.url }}</code></td>
           <td>
             <RcButton
-              v-if="whoami.status.tls.deploymentExists"
+              v-if="echo.status.https.deploymentExists"
               small
-              @click="useWhoamiUrl(whoamiTlsUrl)"
-            >
-              Use this URL
-            </RcButton>
-          </td>
-        </tr>
-        <tr>
-          <td class="pr-10"><strong>http-https-echo (HTTP only)</strong></td>
-          <td class="pr-10">
-            <span v-if="whoami.status.echo.readyReplicas > 0" class="text-success">ready</span>
-            <span v-else-if="whoami.status.echo.deploymentExists" class="text-muted">deployed, not ready yet</span>
-            <span v-else class="text-muted">not deployed</span>
-          </td>
-          <td class="pr-10"><code v-if="whoami.status.echo.deploymentExists">{{ whoami.status.echo.url }}</code></td>
-          <td>
-            <RcButton
-              v-if="whoami.status.echo.deploymentExists"
-              small
-              @click="useWhoamiUrl(echoUrl)"
+              @click="useEchoUrl(echoHttpsUrl)"
             >
               Use this URL
             </RcButton>
@@ -338,19 +316,19 @@ export default {
     <RcButton
       primary
       class="mr-10"
-      :disabled="whoami.deploying || whoami.loading"
-      @click="deployWhoami"
+      :disabled="echo.deploying || echo.loading"
+      @click="deployEcho"
     >
-      {{ whoami.deploying ? 'Deploying...' : 'Deploy whoami (all)' }}
+      {{ echo.deploying ? 'Deploying...' : 'Deploy echo (both)' }}
     </RcButton>
     <RcButton
-      :disabled="!whoami.status || (!whoami.status.http.deploymentExists && !whoami.status.tls.deploymentExists && !whoami.status.echo.deploymentExists) || whoami.removing"
-      @click="removeWhoami"
+      :disabled="!echo.status || (!echo.status.http.deploymentExists && !echo.status.https.deploymentExists) || echo.removing"
+      @click="removeEcho"
     >
-      {{ whoami.removing ? 'Removing...' : 'Remove whoami (all)' }}
+      {{ echo.removing ? 'Removing...' : 'Remove echo (both)' }}
     </RcButton>
-    <p v-if="whoami.error" class="text-error mt-10">
-      {{ whoami.error }}
+    <p v-if="echo.error" class="text-error mt-10">
+      {{ echo.error }}
     </p>
 
     <hr class="mt-20 mb-20">
