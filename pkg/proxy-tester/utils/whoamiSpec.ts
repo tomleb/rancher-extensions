@@ -150,3 +150,63 @@ export function buildWhoamiTlsServiceSpec() {
     },
   };
 }
+
+// Third variant: mendhak/http-https-echo (https://github.com/mendhak/docker-http-https-echo)
+// -- a Node-based echo server that dumps the full incoming request (method, path,
+// headers, body) as JSON. HTTP-only per Tom's request, even though the image also
+// supports HTTPS on a separate port (HTTPS_PORT env var / 8443) -- we simply never set
+// that env var or expose that port, so only the HTTP listener (port 8080 by default,
+// confirmed via `docker inspect` ExposedPorts/Env) is used. Useful specifically for
+// inspecting exactly what /meta/proxy forwards (e.g. confirming header stripping/
+// rewriting, body passthrough) since it echoes the raw request back verbatim, unlike
+// whoami which only reports server-side info.
+export const ECHO_NAME = 'echo';
+export const ECHO_IMAGE = 'mendhak/http-https-echo:latest';
+export const ECHO_PORT = 8080;
+
+export function echoServiceUrl(): string {
+  return `http://${ ECHO_NAME }.${ WHOAMI_NAMESPACE }.svc:${ ECHO_PORT }/`;
+}
+
+export function buildEchoDeploymentSpec() {
+  return {
+    type:     'apps.deployment',
+    metadata: {
+      name:      ECHO_NAME,
+      namespace: WHOAMI_NAMESPACE,
+      labels:    { 'proxy-tester': 'true', app: ECHO_NAME },
+    },
+    spec: {
+      replicas: 1,
+      selector: { matchLabels: { app: ECHO_NAME } },
+      template: {
+        metadata: { labels: { app: ECHO_NAME } },
+        spec:     {
+          containers: [
+            {
+              name:  ECHO_NAME,
+              image: ECHO_IMAGE,
+              env:   [{ name: 'HTTP_PORT', value: String(ECHO_PORT) }],
+              ports: [{ containerPort: ECHO_PORT, name: 'http' }],
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
+export function buildEchoServiceSpec() {
+  return {
+    type:     'service',
+    metadata: {
+      name:      ECHO_NAME,
+      namespace: WHOAMI_NAMESPACE,
+      labels:    { 'proxy-tester': 'true' },
+    },
+    spec: {
+      selector: { app: ECHO_NAME },
+      ports:    [{ port: ECHO_PORT, targetPort: ECHO_PORT, protocol: 'TCP' }],
+    },
+  };
+}

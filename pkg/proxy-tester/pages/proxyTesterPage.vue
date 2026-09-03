@@ -1,7 +1,7 @@
 <script>
 import RcButton from '@components/RcButton/RcButton.vue';
 import { getWhoamiStatus, ensureWhoamiDeployed, teardownWhoami } from '../utils/whoami';
-import { whoamiServiceUrl, whoamiTlsServiceUrl } from '../utils/whoamiSpec';
+import { whoamiServiceUrl, whoamiTlsServiceUrl, echoServiceUrl } from '../utils/whoamiSpec';
 
 const AUTH_MODE = {
   NONE:       'none',
@@ -67,6 +67,10 @@ export default {
 
     whoamiTlsUrl() {
       return whoamiTlsServiceUrl();
+    },
+
+    echoUrl() {
+      return echoServiceUrl();
     },
   },
 
@@ -263,13 +267,15 @@ export default {
     <h3>Test target: whoami</h3>
     <p>
       Deploys <a href="https://github.com/traefik/whoami" target="_blank" rel="noopener">traefik/whoami</a>
-      (a trivial HTTP echo server) to the <code>local</code> cluster, as two variants
-      reachable at stable Service DNS names -- known-good targets for exercising
-      <code>/meta/proxy</code> without relying on a real external API:
+      and <a href="https://github.com/mendhak/docker-http-https-echo" target="_blank" rel="noopener">mendhak/http-https-echo</a>
+      to the <code>local</code> cluster, as three variants reachable at stable Service DNS
+      names -- known-good targets for exercising <code>/meta/proxy</code> without relying
+      on a real external API:
     </p>
     <ul>
-      <li>plain HTTP</li>
-      <li>self-signed HTTPS (untrusted certificate, generated on deploy) — for testing how the proxy handles a target it can't verify (see rancher/rancher#53667)</li>
+      <li>whoami, plain HTTP</li>
+      <li>whoami, self-signed HTTPS (untrusted certificate, generated on deploy) — for testing how the proxy handles a target it can't verify (see rancher/rancher#53667)</li>
+      <li>http-https-echo, plain HTTP only — echoes back the full incoming request (headers, method, body) verbatim as JSON, useful for confirming exactly what /meta/proxy forwards</li>
     </ul>
     <table v-if="whoami.status" class="mb-10">
       <tbody>
@@ -309,6 +315,24 @@ export default {
             </RcButton>
           </td>
         </tr>
+        <tr>
+          <td class="pr-10"><strong>http-https-echo (HTTP only)</strong></td>
+          <td class="pr-10">
+            <span v-if="whoami.status.echo.readyReplicas > 0" class="text-success">ready</span>
+            <span v-else-if="whoami.status.echo.deploymentExists" class="text-muted">deployed, not ready yet</span>
+            <span v-else class="text-muted">not deployed</span>
+          </td>
+          <td class="pr-10"><code v-if="whoami.status.echo.deploymentExists">{{ whoami.status.echo.url }}</code></td>
+          <td>
+            <RcButton
+              v-if="whoami.status.echo.deploymentExists"
+              small
+              @click="useWhoamiUrl(echoUrl)"
+            >
+              Use this URL
+            </RcButton>
+          </td>
+        </tr>
       </tbody>
     </table>
     <RcButton
@@ -317,13 +341,13 @@ export default {
       :disabled="whoami.deploying || whoami.loading"
       @click="deployWhoami"
     >
-      {{ whoami.deploying ? 'Deploying...' : 'Deploy whoami (both)' }}
+      {{ whoami.deploying ? 'Deploying...' : 'Deploy whoami (all)' }}
     </RcButton>
     <RcButton
-      :disabled="!whoami.status || (!whoami.status.http.deploymentExists && !whoami.status.tls.deploymentExists) || whoami.removing"
+      :disabled="!whoami.status || (!whoami.status.http.deploymentExists && !whoami.status.tls.deploymentExists && !whoami.status.echo.deploymentExists) || whoami.removing"
       @click="removeWhoami"
     >
-      {{ whoami.removing ? 'Removing...' : 'Remove whoami (both)' }}
+      {{ whoami.removing ? 'Removing...' : 'Remove whoami (all)' }}
     </RcButton>
     <p v-if="whoami.error" class="text-error mt-10">
       {{ whoami.error }}
