@@ -9,13 +9,24 @@
 //
 // Two variants, same image, different port/env config:
 // - plain HTTP  (echoHttpServiceUrl())  -- HTTP_PORT only, HTTPS_PORT unset
-// - self-signed HTTPS (echoHttpsServiceUrl()) -- HTTPS_PORT only, HTTP_PORT unset
+// - self-signed HTTPS (echoHttpsServiceUrl()) -- HTTPS_PORT set, plus a custom cert (see
+//   below) -- HTTP_PORT unset
 //
-// The image ships its OWN built-in self-signed cert for its HTTPS listener -- confirmed
-// live (docker run + curl): `curl -k https://...:8443/` returns 200, and a normal `curl`
-// without `-k` fails with an SSL cert error (exit 60), i.e. genuinely self-signed/
-// untrusted, exactly like the earlier custom-cert whoami-tls setup, but with NO alpine
-// initContainer/openssl step needed -- the image handles cert generation internally.
+// Cert handling for the HTTPS variant: the image ships its OWN built-in self-signed cert
+// (confirmed live via docker run + openssl s_client), but its CN/SAN are hardcoded to
+// `my.example.com`/`my.example.net`/`192.168.50.108`/`127.0.0.1` -- NONE of which match
+// our actual Service DNS name. A strict cert-hostname validator (arguably what
+// rancher/rancher#53667 -- dynamic cert handling in ProxyEndpoint -- needs to test
+// against) would reject that cert for a HOSTNAME MISMATCH, not the "self-signed but
+// otherwise plausible" case we actually want to exercise. Per the image's own README
+// ("Use your own certificates"), the default cert lives at /app/fullchain.pem +
+// /app/testpk.pem, and can be overridden via the HTTPS_CERT_FILE/HTTPS_KEY_FILE env vars
+// pointing at any mounted path -- so, same initContainer + emptyDir pattern used for the
+// earlier custom whoami-tls setup: an alpine initContainer runs `openssl req` to
+// generate a self-signed cert/key whose CN/SAN correctly cover the Service's own DNS
+// name, into a shared emptyDir, and the echo container is pointed at those files via
+// HTTPS_CERT_FILE/HTTPS_KEY_FILE. Still genuinely self-signed/untrusted (openssl req
+// with no real CA) -- just with a cert that would actually pass a hostname check too.
 //
 // A stable Service DNS name (`<name>.<namespace>.svc`) is used rather than a bare Pod IP
 // because Pod IPs churn on restart/reschedule -- the whole point of this helper is a URL
@@ -26,6 +37,12 @@ export const ECHO_HTTPS_NAME = 'echo-https';
 export const ECHO_IMAGE = 'mendhak/http-https-echo:latest';
 export const ECHO_HTTP_PORT = 8080;
 export const ECHO_HTTPS_PORT = 8443;
+
+// See comment block above -- alpine generates the cert, echo-https reads it via
+// HTTPS_CERT_FILE/HTTPS_KEY_FILE.
+const CERT_GEN_IMAGE = 'alpine:latest';
+const CERT_VOLUME = 'tls-certs';
+const CERT_DIR = '/certs';
 
 // Cluster-internal DNS names -- reachable from any pod on the cluster, including
 // Rancher's own server pod (which is what actually issues the /meta/proxy outbound
@@ -46,26 +63,26 @@ export function buildEchoNamespaceSpec() {
   };
 }
 
-function buildEchoDeploymentSpec(name: string, port: number, httpEnv: boolean) {
+export function buildEchoHttpDeploymentSpec() {
   return {
     type:     'apps.deployment',
     metadata: {
-      name,
+      name:      ECHO_HTTP_NAME,
       namespace: ECHO_NAMESPACE,
-      labels:    { 'proxy-tester': 'true', app: name },
+      labels:    { 'proxy-tester': 'true', app: ECHO_HTTP_NAME },
     },
     spec: {
       replicas: 1,
-      selector: { matchLabels: { app: name } },
+      selector: { matchLabels: { app: ECHO_HTTP_NAME } },
       template: {
-        metadata: { labels: { app: name } },
+        metadata: { labels: { app: ECHO_HTTP_NAME } },
         spec:     {
           containers: [
             {
-              name,
+              name:  ECHO_HTTP_NAME,
               image: ECHO_IMAGE,
-              env:   [{ name: httpEnv ? 'HTTP_PORT' : 'HTTPS_PORT', value: String(port) }],
-              ports: [{ containerPort: port, name: httpEnv ? 'http' : 'https' }],
+              env:   [{ name: 'HTTP_PORT', value: String(ECHO_HTTP_PORT) }],
+              ports: [{ containerPort: ECHO_HTTP_PORT, name: 'http' }],
             },
           ],
         },
@@ -74,33 +91,92 @@ function buildEchoDeploymentSpec(name: string, port: number, httpEnv: boolean) {
   };
 }
 
-function buildEchoServiceSpec(name: string, port: number) {
+export function buildEchoHttpServiceSpec() {
   return {
     type:     'service',
     metadata: {
-      name,
+      name:      ECHO_HTTP_NAME,
       namespace: ECHO_NAMESPACE,
       labels:    { 'proxy-tester': 'true' },
     },
     spec: {
-      selector: { app: name },
-      ports:    [{ port, targetPort: port, protocol: 'TCP' }],
+      selector: { app: ECHO_HTTP_NAME },
+      ports:    [{ port: ECHO_HTTP_PORT, targetPort: ECHO_HTTP_PORT, protocol: 'TCP' }],
     },
   };
 }
 
-export function buildEchoHttpDeploymentSpec() {
-  return buildEchoDeploymentSpec(ECHO_HTTP_NAME, ECHO_HTTP_PORT, true);
-}
-
-export function buildEchoHttpServiceSpec() {
-  return buildEchoServiceSpec(ECHO_HTTP_NAME, ECHO_HTTP_PORT);
-}
-
+// Self-signed HTTPS variant with a cert whose CN/SAN actually cover the Service's own
+// DNS name -- see the module-level comment for why this replaces the image's built-in
+// cert instead of just using HTTPS_PORT alone.
 export function buildEchoHttpsDeploymentSpec() {
-  return buildEchoDeploymentSpec(ECHO_HTTPS_NAME, ECHO_HTTPS_PORT, false);
+  const fqdn = `${ ECHO_HTTPS_NAME }.${ ECHO_NAMESPACE }.svc`;
+  const genCertScript = [
+    'apk add --no-cache openssl >/dev/null',
+    `openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+      -keyout ${ CERT_DIR }/tls.key -out ${ CERT_DIR }/tls.crt \
+      -subj "/CN=${ fqdn }" \
+      -addext "subjectAltName=DNS:${ fqdn },DNS:${ ECHO_HTTPS_NAME },DNS:localhost"`,
+    // http-https-echo runs as a non-root user (per its README) and can't read the
+    // key with openssl's default 0600 perms -- confirmed live: without this, the
+    // container crashes on startup with `EACCES: permission denied, open
+    // '.../tls.key'`. World-readable is fine here; this is a throwaway dev-only
+    // self-signed key with no real-world trust value.
+    `chmod 644 ${ CERT_DIR }/tls.key`,
+  ].join(' && ');
+
+  return {
+    type:     'apps.deployment',
+    metadata: {
+      name:      ECHO_HTTPS_NAME,
+      namespace: ECHO_NAMESPACE,
+      labels:    { 'proxy-tester': 'true', app: ECHO_HTTPS_NAME },
+    },
+    spec: {
+      replicas: 1,
+      selector: { matchLabels: { app: ECHO_HTTPS_NAME } },
+      template: {
+        metadata: { labels: { app: ECHO_HTTPS_NAME } },
+        spec:     {
+          volumes: [{ name: CERT_VOLUME, emptyDir: {} }],
+          initContainers: [
+            {
+              name:         'gen-cert',
+              image:        CERT_GEN_IMAGE,
+              command:      ['sh', '-c', genCertScript],
+              volumeMounts: [{ name: CERT_VOLUME, mountPath: CERT_DIR }],
+            },
+          ],
+          containers: [
+            {
+              name:  ECHO_HTTPS_NAME,
+              image: ECHO_IMAGE,
+              env:   [
+                { name: 'HTTPS_PORT', value: String(ECHO_HTTPS_PORT) },
+                { name: 'HTTPS_CERT_FILE', value: `${ CERT_DIR }/tls.crt` },
+                { name: 'HTTPS_KEY_FILE', value: `${ CERT_DIR }/tls.key` },
+              ],
+              ports:        [{ containerPort: ECHO_HTTPS_PORT, name: 'https' }],
+              volumeMounts: [{ name: CERT_VOLUME, mountPath: CERT_DIR, readOnly: true }],
+            },
+          ],
+        },
+      },
+    },
+  };
 }
 
 export function buildEchoHttpsServiceSpec() {
-  return buildEchoServiceSpec(ECHO_HTTPS_NAME, ECHO_HTTPS_PORT);
+  return {
+    type:     'service',
+    metadata: {
+      name:      ECHO_HTTPS_NAME,
+      namespace: ECHO_NAMESPACE,
+      labels:    { 'proxy-tester': 'true' },
+    },
+    spec: {
+      selector: { app: ECHO_HTTPS_NAME },
+      ports:    [{ port: ECHO_HTTPS_PORT, targetPort: ECHO_HTTPS_PORT, protocol: 'TCP' }],
+    },
+  };
 }
