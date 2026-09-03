@@ -333,91 +333,97 @@ export default {
 
     <hr class="mt-20 mb-20">
 
-    <form @submit.prevent="submit">
-      <div class="row mb-10">
-        <label>Target URL</label>
-        <input v-model="form.url" type="text" placeholder="https://api.example.com/v1/foo" style="width: 100%;">
+    <div class="request-row">
+      <form class="request-col" @submit.prevent="submit">
+        <div class="row mb-10">
+          <label>Target URL</label>
+          <input v-model="form.url" type="text" placeholder="https://api.example.com/v1/foo" style="width: 100%;">
+        </div>
+
+        <div class="row mb-10">
+          <label>Method</label>
+          <select v-model="form.method">
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+            <option>PATCH</option>
+            <option>DELETE</option>
+          </select>
+        </div>
+
+        <div class="row mb-10">
+          <label>Auth Mode</label>
+          <select v-model="form.authMode">
+            <option :value="AUTH_MODE.NONE">None</option>
+            <option :value="AUTH_MODE.CREDENTIAL">Cloud Credential (X-Api-CattleAuth-Header)</option>
+            <option :value="AUTH_MODE.TOKEN">Plain Token (X-API-Auth-Header)</option>
+          </select>
+        </div>
+
+        <div v-if="form.authMode === AUTH_MODE.CREDENTIAL" class="row mb-10">
+          <label>Credential ID</label>
+          <input v-model="form.credentialId" type="text" placeholder="cattle-global-data:cc-abc12" style="width: 100%;">
+        </div>
+
+        <div v-if="form.authMode === AUTH_MODE.TOKEN" class="row mb-10">
+          <label>Token</label>
+          <input v-model="form.token" type="text" placeholder="raw token value" style="width: 100%;">
+        </div>
+
+        <div v-if="form.authMode !== AUTH_MODE.NONE" class="row mb-10">
+          <label>Auth Signer</label>
+          <select v-model="form.authSigner">
+            <option value="bearer">bearer</option>
+            <option value="basic">basic</option>
+            <option value="digest">digest</option>
+            <option value="awsv4">awsv4</option>
+            <option value="arbitrary">arbitrary</option>
+          </select>
+        </div>
+
+        <div v-if="needsUsernameField" class="row mb-10">
+          <label>Username Field (unprefixed secret key)</label>
+          <input v-model="form.usernameField" type="text" placeholder="e.g. accessKey">
+        </div>
+
+        <div v-if="needsPasswordField" class="row mb-10">
+          <label>Password Field (unprefixed secret key)</label>
+          <input v-model="form.passwordField" type="text" placeholder="e.g. secretKey">
+        </div>
+
+        <div class="row mb-10">
+          <label>Extra Headers (JSON object)</label>
+          <textarea v-model="form.headersJson" rows="3" style="width: 100%;" placeholder='{"Accept": "application/json"}' />
+        </div>
+
+        <div class="row mb-10">
+          <label>Body (JSON, for POST/PUT/PATCH)</label>
+          <textarea v-model="form.bodyJson" rows="4" style="width: 100%;" placeholder='{"key": "value"}' />
+        </div>
+
+        <RcButton primary type="submit" :disabled="loading">
+          {{ loading ? 'Sending...' : 'Send Request' }}
+        </RcButton>
+      </form>
+
+      <div class="response-col">
+        <div v-if="error">
+          <h4>Error</h4>
+          <p v-if="error.status">Status: {{ error.status }}</p>
+          <p>{{ error.message }}</p>
+          <pre v-if="error.body">{{ error.body }}</pre>
+        </div>
+
+        <div v-if="response">
+          <h4>Response</h4>
+          <p>Status: {{ response.status }}</p>
+          <pre>{{ JSON.stringify(response.body, null, 2) }}</pre>
+        </div>
+
+        <p v-if="!error && !response" class="text-muted">
+          Response will appear here after you send a request.
+        </p>
       </div>
-
-      <div class="row mb-10">
-        <label>Method</label>
-        <select v-model="form.method">
-          <option>GET</option>
-          <option>POST</option>
-          <option>PUT</option>
-          <option>PATCH</option>
-          <option>DELETE</option>
-        </select>
-      </div>
-
-      <div class="row mb-10">
-        <label>Auth Mode</label>
-        <select v-model="form.authMode">
-          <option :value="AUTH_MODE.NONE">None</option>
-          <option :value="AUTH_MODE.CREDENTIAL">Cloud Credential (X-Api-CattleAuth-Header)</option>
-          <option :value="AUTH_MODE.TOKEN">Plain Token (X-API-Auth-Header)</option>
-        </select>
-      </div>
-
-      <div v-if="form.authMode === AUTH_MODE.CREDENTIAL" class="row mb-10">
-        <label>Credential ID</label>
-        <input v-model="form.credentialId" type="text" placeholder="cattle-global-data:cc-abc12" style="width: 100%;">
-      </div>
-
-      <div v-if="form.authMode === AUTH_MODE.TOKEN" class="row mb-10">
-        <label>Token</label>
-        <input v-model="form.token" type="text" placeholder="raw token value" style="width: 100%;">
-      </div>
-
-      <div v-if="form.authMode !== AUTH_MODE.NONE" class="row mb-10">
-        <label>Auth Signer</label>
-        <select v-model="form.authSigner">
-          <option value="bearer">bearer</option>
-          <option value="basic">basic</option>
-          <option value="digest">digest</option>
-          <option value="awsv4">awsv4</option>
-          <option value="arbitrary">arbitrary</option>
-        </select>
-      </div>
-
-      <div v-if="needsUsernameField" class="row mb-10">
-        <label>Username Field (unprefixed secret key)</label>
-        <input v-model="form.usernameField" type="text" placeholder="e.g. accessKey">
-      </div>
-
-      <div v-if="needsPasswordField" class="row mb-10">
-        <label>Password Field (unprefixed secret key)</label>
-        <input v-model="form.passwordField" type="text" placeholder="e.g. secretKey">
-      </div>
-
-      <div class="row mb-10">
-        <label>Extra Headers (JSON object)</label>
-        <textarea v-model="form.headersJson" rows="3" style="width: 100%;" placeholder='{"Accept": "application/json"}' />
-      </div>
-
-      <div class="row mb-10">
-        <label>Body (JSON, for POST/PUT/PATCH)</label>
-        <textarea v-model="form.bodyJson" rows="4" style="width: 100%;" placeholder='{"key": "value"}' />
-      </div>
-
-      <RcButton primary type="submit" :disabled="loading">
-        {{ loading ? 'Sending...' : 'Send Request' }}
-      </RcButton>
-    </form>
-
-    <hr class="mt-20 mb-20">
-
-    <div v-if="error" class="mt-20">
-      <h4>Error</h4>
-      <p v-if="error.status">Status: {{ error.status }}</p>
-      <p>{{ error.message }}</p>
-      <pre v-if="error.body">{{ error.body }}</pre>
-    </div>
-
-    <div v-if="response" class="mt-20">
-      <h4>Response</h4>
-      <p>Status: {{ response.status }}</p>
-      <pre>{{ JSON.stringify(response.body, null, 2) }}</pre>
     </div>
 
     <hr class="mt-20 mb-20">
@@ -440,10 +446,25 @@ export default {
 </template>
 
 <style lang="scss" scoped>
+.request-row {
+  display: flex;
+  gap: 40px;
+  align-items: flex-start;
+}
+
+.request-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.response-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .row {
   display: flex;
   flex-direction: column;
-  max-width: 600px;
 
   label {
     font-weight: bold;
