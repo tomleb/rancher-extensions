@@ -16,7 +16,15 @@ Rancher Dashboard UI extensions, developed as a single "dev app" skeleton
 - **[proxy-tester](./pkg/proxy-tester)** — Adds a page to test the `/meta/proxy`
   endpoint
 
-## Development
+# Installing
+
+1. Go to local cluster
+2. Go to Apps -> Repositories. Click on Add Repositories.
+3. Add Helm Repository with following Index URL: https://tomleb.github.io/rancher-extensions
+4. Go to Extensions tab in the sidebar
+5. Find and install the extensions
+
+# Development
 
 Only requirements is docker. Run the following command and then you can go to
 https://localhost:8005.
@@ -25,7 +33,7 @@ https://localhost:8005.
 make dev API=<your-Rancher-URL>
 ```
 
-## Building & publishing
+# Releasing
 
 The following instructions will build and publish the extension to Github Pages
 (in `gh-pages` branch).
@@ -33,11 +41,3 @@ The following instructions will build and publish the extension to Github Pages
 1. Tag a new release this way: `<extension-name>-<version>` (eg:
    `sqlite-explorer-0.1.0`)
 2. Manually create a Github release for that new tag (this triggers a workflow)
-
-## Installing in Rancher
-
-1. Go to local cluster
-2. Go to Apps -> Repositories. Click on Add Repositories.
-3. Add Helm Repository with following Index URL: https://tomleb.github.io/rancher-extensions
-4. Go to Extensions tab in the sidebar
-5. Find and install the extensions
