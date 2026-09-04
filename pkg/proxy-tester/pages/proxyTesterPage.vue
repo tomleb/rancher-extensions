@@ -1,6 +1,8 @@
 <script>
 import RcButton from '@components/RcButton/RcButton.vue';
-import { getEchoStatus, ensureEchoDeployed, teardownEcho } from '../utils/echo';
+import {
+  getEchoStatus, ensureEchoDeployed, teardownEcho, getEchoCaCertificateBase64,
+} from '../utils/echo';
 import { echoHttpServiceUrl, echoHttpsServiceUrl } from '../utils/echoSpec';
 
 const AUTH_MODE = {
@@ -42,6 +44,12 @@ export default {
         removing: false,
         error:    null,
         status:   null,
+        caCert:   {
+          loading: false,
+          error:   null,
+          copied:  false,
+          value:   null,
+        },
       },
     };
   },
@@ -251,6 +259,31 @@ export default {
       this.form.url = url;
       this.form.authMode = AUTH_MODE.NONE;
     },
+
+    // Copies the CA cert base64-encoded (equivalent to `base64 -w0`) rather than as raw
+    // PEM -- ProxyEndpoint's spec.routes[].caBundle is a []byte field, which Kubernetes
+    // (de)serializes as a single-line base64 string, not a multi-line PEM block. This is
+    // the value to paste directly into that field.
+    async copyEchoCaCertificate() {
+      this.echo.caCert.loading = true;
+      this.echo.caCert.error = null;
+      this.echo.caCert.copied = false;
+      try {
+        const base64 = await getEchoCaCertificateBase64(this.$store);
+
+        if (!base64) {
+          throw new Error('CA certificate not available yet -- the Certificate may still be issuing, try again in a few seconds.');
+        }
+
+        this.echo.caCert.value = base64;
+        await navigator.clipboard.writeText(base64);
+        this.echo.caCert.copied = true;
+      } catch (e) {
+        this.echo.caCert.error = this.describeError(e).message;
+      } finally {
+        this.echo.caCert.loading = false;
+      }
+    },
   },
 };
 </script>
@@ -271,7 +304,7 @@ export default {
     </p>
     <ul>
       <li>plain HTTP</li>
-      <li>self-signed HTTPS (built-in cert, untrusted) — for testing how the proxy handles a target it can't verify (see rancher/rancher#53667)</li>
+      <li>self-signed HTTPS (cert issued by a per-namespace cert-manager <code>Issuer</code>, untrusted) — for testing how the proxy handles a target it can't verify (see rancher/rancher#53667). Its CA certificate can be copied below, base64-encoded (<code>base64 -w0</code> form), ready to paste into a <code>ProxyEndpoint</code>'s <code>spec.routes[].caBundle</code> field.</li>
     </ul>
     <table v-if="echo.status" class="mb-10">
       <tbody>
@@ -305,14 +338,38 @@ export default {
             <RcButton
               v-if="echo.status.https.deploymentExists"
               small
+              class="mr-10"
               @click="useEchoUrl(echoHttpsUrl)"
             >
               Use this URL
+            </RcButton>
+            <RcButton
+              v-if="echo.status.tlsSecretExists"
+              small
+              :disabled="echo.caCert.loading"
+              @click="copyEchoCaCertificate"
+            >
+              {{ echo.caCert.loading ? 'Copying...' : 'Copy CA Certificate (base64)' }}
             </RcButton>
           </td>
         </tr>
       </tbody>
     </table>
+    <p v-if="echo.caCert.copied" class="text-success mb-10">
+      CA certificate (base64, single line) copied to clipboard -- paste directly into a ProxyEndpoint's <code>spec.routes[].caBundle</code> field.
+    </p>
+    <p v-if="echo.caCert.error" class="text-error mb-10">
+      {{ echo.caCert.error }}
+    </p>
+    <textarea
+      v-if="echo.caCert.value"
+      :value="echo.caCert.value"
+      readonly
+      rows="4"
+      style="width: 100%; word-break: break-all;"
+      class="mb-10"
+      @focus="$event.target.select()"
+    />
     <RcButton
       primary
       class="mr-10"

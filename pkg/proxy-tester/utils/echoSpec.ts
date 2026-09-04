@@ -9,8 +9,8 @@
 //
 // Two variants, same image, different port/env config:
 // - plain HTTP  (echoHttpServiceUrl())  -- HTTP_PORT only, HTTPS_PORT unset
-// - self-signed HTTPS (echoHttpsServiceUrl()) -- HTTPS_PORT set, plus a custom cert (see
-//   below) -- HTTP_PORT unset
+// - self-signed HTTPS (echoHttpsServiceUrl()) -- HTTPS_PORT set, plus a cert-manager-
+//   issued cert (see below) -- HTTP_PORT unset
 //
 // Cert handling for the HTTPS variant: the image ships its OWN built-in self-signed cert
 // (confirmed live via docker run + openssl s_client), but its CN/SAN are hardcoded to
@@ -18,15 +18,28 @@
 // our actual Service DNS name. A strict cert-hostname validator (arguably what
 // rancher/rancher#53667 -- dynamic cert handling in ProxyEndpoint -- needs to test
 // against) would reject that cert for a HOSTNAME MISMATCH, not the "self-signed but
-// otherwise plausible" case we actually want to exercise. Per the image's own README
-// ("Use your own certificates"), the default cert lives at /app/fullchain.pem +
-// /app/testpk.pem, and can be overridden via the HTTPS_CERT_FILE/HTTPS_KEY_FILE env vars
-// pointing at any mounted path -- so, same initContainer + emptyDir pattern used for the
-// earlier custom whoami-tls setup: an alpine initContainer runs `openssl req` to
-// generate a self-signed cert/key whose CN/SAN correctly cover the Service's own DNS
-// name, into a shared emptyDir, and the echo container is pointed at those files via
-// HTTPS_CERT_FILE/HTTPS_KEY_FILE. Still genuinely self-signed/untrusted (openssl req
-// with no real CA) -- just with a cert that would actually pass a hostname check too.
+// otherwise plausible" case we actually want to exercise.
+//
+// Rancher itself requires cert-manager as a prerequisite in essentially every real
+// deployment (it's how Rancher's own webhook/TLS certs get issued), and this extension
+// is local-cluster-only by design (see localCluster.ts) -- so rather than hand-rolling
+// cert generation with an alpine+openssl initContainer, we use cert-manager's own
+// `Issuer`/`Certificate` CRs: a namespace-scoped self-signed Issuer, and a Certificate
+// resource requesting a cert whose dnsNames cover the Service's own DNS name. This is
+// simpler AND solves the "copy the CA cert" requirement for free -- cert-manager
+// automatically writes `ca.crt` (alongside `tls.crt`/`tls.key`) into the resulting
+// Secret, no custom RBAC/ConfigMap-publishing plumbing needed (verified live: for a
+// selfSigned Issuer, `ca.crt` == `tls.crt`, both readable directly off the Secret via
+// the Steve API).
+//
+// Per the image's own README ("Use your own certificates"), the cert is overridable via
+// the HTTPS_CERT_FILE/HTTPS_KEY_FILE env vars pointing at any mounted path -- so the
+// echo-https container mounts the cert-manager Secret directly and points at
+// tls.crt/tls.key inside it. Verified live end-to-end: created a selfSigned Issuer +
+// Certificate, mounted the resulting Secret into a real http-https-echo pod via
+// HTTPS_CERT_FILE/HTTPS_KEY_FILE, confirmed `curl -k` -> 200 and a normal `curl` with
+// the correct hostname (but real cert validation) -> SSL error (exit 60, untrusted as
+// intended, NOT a hostname mismatch).
 //
 // A stable Service DNS name (`<name>.<namespace>.svc`) is used rather than a bare Pod IP
 // because Pod IPs churn on restart/reschedule -- the whole point of this helper is a URL
@@ -38,11 +51,12 @@ export const ECHO_IMAGE = 'mendhak/http-https-echo:latest';
 export const ECHO_HTTP_PORT = 8080;
 export const ECHO_HTTPS_PORT = 8443;
 
-// See comment block above -- alpine generates the cert, echo-https reads it via
-// HTTPS_CERT_FILE/HTTPS_KEY_FILE.
-const CERT_GEN_IMAGE = 'alpine:latest';
-const CERT_VOLUME = 'tls-certs';
-const CERT_DIR = '/certs';
+// cert-manager resource names. The Certificate's secretName is what the UI's "Copy CA
+// Certificate" reads `ca.crt` from directly (Steve `secret` type, same mechanism the
+// rest of this extension already uses for reading resources on the local cluster).
+export const ECHO_TLS_ISSUER_NAME = 'echo-https-selfsigned-issuer';
+export const ECHO_TLS_SECRET_NAME = 'echo-https-tls';
+export const ECHO_TLS_CA_KEY = 'ca.crt';
 
 // Cluster-internal DNS names -- reachable from any pod on the cluster, including
 // Rancher's own server pod (which is what actually issues the /meta/proxy outbound
@@ -60,6 +74,43 @@ export function buildEchoNamespaceSpec() {
   return {
     type:     'namespace',
     metadata: { name: ECHO_NAMESPACE, labels: { 'proxy-tester': 'true' } },
+  };
+}
+
+// Namespace-scoped self-signed Issuer -- no external ACME/CA dependency, matches what
+// we verified live against this cluster's existing cert-manager v1.19.1 install.
+export function buildEchoTlsIssuerSpec() {
+  return {
+    type:     'cert-manager.io.issuer',
+    metadata: {
+      name:      ECHO_TLS_ISSUER_NAME,
+      namespace: ECHO_NAMESPACE,
+      labels:    { 'proxy-tester': 'true' },
+    },
+    spec: { selfSigned: {} },
+  };
+}
+
+// Requests a cert whose dnsNames cover the Service's own DNS name -- see module-level
+// comment for why this replaces the image's built-in cert. cert-manager writes
+// tls.crt/tls.key/ca.crt into ECHO_TLS_SECRET_NAME once issued (self-signed -> ca.crt
+// and tls.crt are identical, confirmed live).
+export function buildEchoTlsCertificateSpec() {
+  const fqdn = `${ ECHO_HTTPS_NAME }.${ ECHO_NAMESPACE }.svc`;
+
+  return {
+    type:     'cert-manager.io.certificate',
+    metadata: {
+      name:      ECHO_HTTPS_NAME,
+      namespace: ECHO_NAMESPACE,
+      labels:    { 'proxy-tester': 'true' },
+    },
+    spec: {
+      secretName: ECHO_TLS_SECRET_NAME,
+      dnsNames:   [fqdn, ECHO_HTTPS_NAME, 'localhost'],
+      issuerRef:  { name: ECHO_TLS_ISSUER_NAME, kind: 'Issuer' },
+      isCA:       false,
+    },
   };
 }
 
@@ -106,25 +157,12 @@ export function buildEchoHttpServiceSpec() {
   };
 }
 
-// Self-signed HTTPS variant with a cert whose CN/SAN actually cover the Service's own
-// DNS name -- see the module-level comment for why this replaces the image's built-in
-// cert instead of just using HTTPS_PORT alone.
+// Self-signed HTTPS variant, cert mounted straight from the cert-manager-issued Secret --
+// see module-level comment. No initContainer, no manual cert generation, no key
+// permission workaround needed (Kubernetes Secret volume mounts are world-readable by
+// default -- confirmed live, unlike the earlier openssl-in-emptyDir approach which
+// needed an explicit chmod because openssl writes keys 0600).
 export function buildEchoHttpsDeploymentSpec() {
-  const fqdn = `${ ECHO_HTTPS_NAME }.${ ECHO_NAMESPACE }.svc`;
-  const genCertScript = [
-    'apk add --no-cache openssl >/dev/null',
-    `openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-      -keyout ${ CERT_DIR }/tls.key -out ${ CERT_DIR }/tls.crt \
-      -subj "/CN=${ fqdn }" \
-      -addext "subjectAltName=DNS:${ fqdn },DNS:${ ECHO_HTTPS_NAME },DNS:localhost"`,
-    // http-https-echo runs as a non-root user (per its README) and can't read the
-    // key with openssl's default 0600 perms -- confirmed live: without this, the
-    // container crashes on startup with `EACCES: permission denied, open
-    // '.../tls.key'`. World-readable is fine here; this is a throwaway dev-only
-    // self-signed key with no real-world trust value.
-    `chmod 644 ${ CERT_DIR }/tls.key`,
-  ].join(' && ');
-
   return {
     type:     'apps.deployment',
     metadata: {
@@ -138,26 +176,18 @@ export function buildEchoHttpsDeploymentSpec() {
       template: {
         metadata: { labels: { app: ECHO_HTTPS_NAME } },
         spec:     {
-          volumes: [{ name: CERT_VOLUME, emptyDir: {} }],
-          initContainers: [
-            {
-              name:         'gen-cert',
-              image:        CERT_GEN_IMAGE,
-              command:      ['sh', '-c', genCertScript],
-              volumeMounts: [{ name: CERT_VOLUME, mountPath: CERT_DIR }],
-            },
-          ],
+          volumes: [{ name: 'tls-certs', secret: { secretName: ECHO_TLS_SECRET_NAME } }],
           containers: [
             {
               name:  ECHO_HTTPS_NAME,
               image: ECHO_IMAGE,
               env:   [
                 { name: 'HTTPS_PORT', value: String(ECHO_HTTPS_PORT) },
-                { name: 'HTTPS_CERT_FILE', value: `${ CERT_DIR }/tls.crt` },
-                { name: 'HTTPS_KEY_FILE', value: `${ CERT_DIR }/tls.key` },
+                { name: 'HTTPS_CERT_FILE', value: '/certs/tls.crt' },
+                { name: 'HTTPS_KEY_FILE', value: '/certs/tls.key' },
               ],
               ports:        [{ containerPort: ECHO_HTTPS_PORT, name: 'https' }],
-              volumeMounts: [{ name: CERT_VOLUME, mountPath: CERT_DIR, readOnly: true }],
+              volumeMounts: [{ name: 'tls-certs', mountPath: '/certs', readOnly: true }],
             },
           ],
         },
