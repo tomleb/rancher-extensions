@@ -4,6 +4,7 @@ import {
   getEchoStatus, ensureEchoDeployed, teardownEcho, getEchoCaCertificateBase64,
 } from '../utils/echo';
 import { echoHttpServiceUrl, echoHttpsServiceUrl } from '../utils/echoSpec';
+import { allowDomainsWithOptions } from '../utils/proxyEndpoint';
 
 const AUTH_MODE = {
   NONE:       'none',
@@ -30,6 +31,8 @@ export default {
         headersJson:    '{}',
         bodyJson:       '',
         allowDomain:    '',
+        allowCaBundle:  '',       // base64-encoded PEM, matches ProxyEndpoint's []byte caBundle field
+        allowInsecure:  false,
       },
       AUTH_MODE,
       loading:      false,
@@ -208,13 +211,21 @@ export default {
 
       this.allowLoading = true;
       try {
-        await this.proxy.allowDomains([this.form.allowDomain]);
+        await allowDomainsWithOptions(this.$store, [{
+          domain:             this.form.allowDomain,
+          caBundle:           this.form.allowCaBundle || undefined,
+          insecureSkipVerify: this.form.allowInsecure,
+        }]);
         this.allowMessage = `Created ProxyEndpoint allowing "${ this.form.allowDomain }"`;
       } catch (e) {
         this.allowError = e?.message || String(e);
       } finally {
         this.allowLoading = false;
       }
+    },
+
+    useEchoCaBundleForAllow() {
+      this.form.allowCaBundle = this.echo.caCert.value;
     },
 
     async refreshEchoStatus() {
@@ -488,7 +499,26 @@ export default {
     <h3>Allow-list a domain</h3>
     <p>Creates a <code>ProxyEndpoint</code> CR so the target host passes Rancher's proxy allow-list check.</p>
     <div class="row mb-10">
+      <label>Domain</label>
       <input v-model="form.allowDomain" type="text" placeholder="api.example.com or %.example.com" style="width: 100%;">
+    </div>
+    <div class="row mb-10">
+      <label>Insecure Skip Verify</label>
+      <input v-model="form.allowInsecure" type="checkbox">
+    </div>
+    <div v-if="!form.allowInsecure" class="row mb-10">
+      <label>
+        CA Bundle (base64)
+        <RcButton
+          v-if="echo.caCert.value"
+          small
+          class="ml-10"
+          @click="useEchoCaBundleForAllow"
+        >
+          Use echo-https CA
+        </RcButton>
+      </label>
+      <textarea v-model="form.allowCaBundle" rows="3" style="width: 100%; word-break: break-all;" placeholder="base64-encoded PEM CA bundle (optional)" />
     </div>
     <RcButton primary :disabled="allowLoading" @click="allowDomain">
       {{ allowLoading ? 'Creating...' : 'Allow Domain' }}
