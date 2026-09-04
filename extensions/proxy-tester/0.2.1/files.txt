@@ -1,0 +1,5 @@
+plugin/package.json
+plugin/proxy-tester-0.2.1.umd.min.37.js
+plugin/proxy-tester-0.2.1.umd.min.37.js.map
+plugin/proxy-tester-0.2.1.umd.min.js
+plugin/proxy-tester-0.2.1.umd.min.js.map

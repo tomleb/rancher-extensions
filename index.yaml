@@ -11,6 +11,26 @@ entries:
       catalog.cattle.io/ui-component: plugins
       catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 4.0.0'
     apiVersion: v2
+    appVersion: 0.2.1
+    created: "2026-09-04T18:58:53.418908692Z"
+    description: Simple form-based extension for manually testing Rancher's /meta/proxy
+      (shell.proxy) API
+    digest: 5d095c6b42eff3001a254f7ad6501063e4714de0805b490fdcb2ffb2572cf710
+    name: proxy-tester
+    type: application
+    urls:
+    - assets/proxy-tester/proxy-tester-0.2.1.tgz
+    version: 0.2.1
+  - annotations:
+      catalog.cattle.io/certified: rancher
+      catalog.cattle.io/namespace: cattle-ui-plugin-system
+      catalog.cattle.io/os: linux
+      catalog.cattle.io/permits-os: linux, windows
+      catalog.cattle.io/rancher-version: '>= 2.10.0'
+      catalog.cattle.io/scope: management
+      catalog.cattle.io/ui-component: plugins
+      catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 4.0.0'
+    apiVersion: v2
     appVersion: 0.1.0
     created: "2026-09-04T16:33:08.668276478Z"
     description: Simple form-based extension for manually testing Rancher's /meta/proxy
@@ -79,4 +99,4 @@ entries:
     urls:
     - assets/sqlite-explorer/sqlite-explorer-0.1.0.tgz
     version: 0.1.0
-generated: "2026-09-04T16:33:08.666841905Z"
+generated: "2026-09-04T18:58:53.41820065Z"
