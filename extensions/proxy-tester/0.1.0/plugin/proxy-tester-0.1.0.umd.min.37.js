@@ -1,0 +1,2 @@
+(("undefined"!==typeof self?self:this)["webpackChunkproxy_tester_0_1_0"]=("undefined"!==typeof self?self:this)["webpackChunkproxy_tester_0_1_0"]||[]).push([[37],{9037:function(e){const t=[{product:{"proxy-tester":"Proxy Tester"},proxyTester:{label:"Proxy Tester"}}];e.exports=t.length<=1?t[0]:t}}]);
+//# sourceMappingURL=proxy-tester-0.1.0.umd.min.37.js.map
